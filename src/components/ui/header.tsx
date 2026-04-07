@@ -10,14 +10,14 @@ export const Header = () => {
   return (
     <header className="w-full h-16 border-b-4 border-border bg-bw flex justify-start items-center gap-4">
       <nav className="border-r-4 border-border h-full flex items-center px-3.5">
-        <a href="/" className="border-2 border-black bg-main px-3 py-2 rounded-md text-xl font-bold flex items-center">
+        <a href="/" className="border-2 border-black text-main-foreground bg-main px-3 py-2 rounded-md text-xl font-bold flex items-center">
           <span className="hidden sm:inline">BOOKS&amp;BOOKS</span>
           <span className="sm:hidden">B&amp;B</span>
         </a>
       </nav>
       <div className="flex items-center justify-between gap-2 pr-2 w-full">
-        <h1 className="text-2xl font-bold" aria-label="[Template]">
-          <strong className="text-main">[Template]</strong> [Template]
+        <h1 className="text-2xl font-bold" aria-label="300 OVAS 2026">
+          <strong className="text-main">300</strong> OVAS 2026
         </h1>
         <div className="flex items-center gap-2">
           <Button
