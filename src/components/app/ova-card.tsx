@@ -1,9 +1,8 @@
-import { useRef } from 'react';
+import { useState } from 'react';
 import confetti from 'canvas-confetti';
 import { Link } from 'lucide-react';
-import { toast } from 'sonner';
-import { useMutation } from '@tanstack/react-query';
 
+import { useNotice } from '@/hooks/useNotice';
 import ovaService from '@/services/ova-service';
 import type { Ova } from '@/types/ova';
 
@@ -11,9 +10,8 @@ import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { Card, CardContent, CardFooter, CardHeader } from '../ui/card';
 
-// A blob URL keeps the whole ZIP in memory until revoked. Wait long enough for the browser to start
-// reading it (FileSaver.js uses the same 40s), then release it.
-const OBJECT_URL_LIFETIME_MS = 40_000;
+// The download button stays disabled for a moment after a click so the same ZIP is not requested twice by mistake.
+const DOWNLOAD_START_COOLDOWN_MS = 3_000;
 
 interface Props {
   ova?: Ova;
@@ -21,33 +19,8 @@ interface Props {
 }
 
 export const OvaCard: React.FC<Props> = ({ ova, viewMode = 'grid' }) => {
-  const toastIdRef = useRef<string | number | undefined>(undefined);
-
-  const mutation = useMutation({
-    mutationFn: (id: string) => ovaService.fetchOvaZip(id),
-    onMutate: () => {
-      toastIdRef.current = toast.loading('Preparing download…', {
-        description: 'Creating the ZIP file, please wait.'
-      });
-    },
-    onSuccess: (zip) => {
-      toast.success('Download ready! 📁', {
-        id: toastIdRef.current,
-        duration: 5000,
-        description: 'Your ZIP file has been downloaded.'
-      });
-
-      throwConfetti();
-      handleDownload(zip.data);
-    },
-    onError: () => {
-      toast.error('Download failed 📁', {
-        id: toastIdRef.current,
-        duration: 5000,
-        description: 'Please try again later.'
-      });
-    }
-  });
+  const [isStarting, setIsStarting] = useState(false);
+  const { showNotice } = useNotice();
 
   // Function to navigate to the OVA's URL in a new tab
   const handleNavigateToTheOva = () => {
@@ -55,29 +28,64 @@ export const OvaCard: React.FC<Props> = ({ ova, viewMode = 'grid' }) => {
     window.open(ova.ovaPath, '_blank');
   };
 
-  // Function to trigger the download of a ZIP blob
-  const handleDownload = (blob: Blob) => {
-    const url = URL.createObjectURL(blob);
+  // Function to hand the OVA zip download over to the browser. The API answers with
+  // `Content-Disposition: attachment` and streams the ZIP, so it starts downloading right away
+  // (with the browser's own progress) instead of being buffered in memory first.
+  const handleZip = () => {
+    if (!ova) return;
+
     const a = document.createElement('a');
-    a.href = url;
-    a.download = `${ova?.title}.zip`;
+    a.href = ovaService.getOvaZipUrl(ova.id);
+    a.download = ''; // Use the file name sent by the API
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), OBJECT_URL_LIFETIME_MS);
-  };
 
-  // Function to handle the creation and download of the OVA zip file
-  const handleZip = async () => {
-    if (!ova) return;
-    mutation.mutate(ova.id);
+    // The browser owns the download from here on, so the user needs to know where to look and what to do with a ZIP
+    showNotice({
+      variant: 'success',
+      title: 'Your download is starting',
+      description: `"${ova.title}" is being saved to your computer as a ZIP file. Big OVAs can take several minutes.`,
+      steps: [
+        "Watch the progress in your browser's downloads: look for a small arrow pointing down (↓) next to the address bar at the top.",
+        'Wait until the browser says the download is complete. If it says the download failed, come back here and press "Download" again.',
+        'Open your Downloads folder, find the ZIP file and unzip it before opening the OVA (on Windows: right-click the file and choose "Extract all…").'
+      ]
+    });
+    throwConfetti();
+
+    setIsStarting(true);
+    setTimeout(() => setIsStarting(false), DOWNLOAD_START_COOLDOWN_MS);
   };
 
   // Function to copy the OVA link to the clipboard
   const handleCopyLink = async () => {
     if (!ova) return;
-    await navigator.clipboard.writeText(ova.ovaPath);
-    toast.success('Link copied to clipboard \uD83D\uDD17', { duration: 3000 });
+    try {
+      await navigator.clipboard.writeText(ova.ovaPath);
+    } catch {
+      // The Clipboard API is missing on pages served without HTTPS, and rejects if the browser denies access
+      showNotice({
+        variant: 'error',
+        title: "We couldn't copy the link",
+        description: `Your browser did not let us copy the link to "${ova.title}" automatically. You can still copy it by hand.`,
+        steps: [
+          'Close this message and press "Go to the OVA".',
+          'In the page that opens, click the address bar at the top and press Ctrl + C (Cmd + C on a Mac) to copy the link.'
+        ]
+      });
+      return;
+    }
+
+    showNotice({
+      variant: 'success',
+      title: 'Link copied',
+      description: `The link to "${ova.title}" is saved on your clipboard. It has not been sent to anyone yet.`,
+      steps: [
+        'Open the place where you want to share it: an email, a chat, a document\u2026',
+        'Paste it there: press Ctrl + V (Cmd + V on a Mac), or right-click and choose "Paste".'
+      ]
+    });
   };
 
   // Function to trigger a confetti animation for 2 seconds (skipped when the user asks for reduced motion)
@@ -145,8 +153,8 @@ export const OvaCard: React.FC<Props> = ({ ova, viewMode = 'grid' }) => {
           <Button variant="neutral" size="sm" className="flex-1 md:flex-none" onClick={handleNavigateToTheOva}>
             Go to the OVA
           </Button>
-          <Button size="sm" className="flex-1 md:flex-none" onClick={handleZip} disabled={mutation.isPending}>
-            {mutation.isPending ? (
+          <Button size="sm" className="flex-1 md:flex-none" onClick={handleZip} disabled={isStarting}>
+            {isStarting ? (
               <svg
                 aria-hidden="true"
                 role="status"
@@ -203,8 +211,8 @@ export const OvaCard: React.FC<Props> = ({ ova, viewMode = 'grid' }) => {
         <Button variant="neutral" onClick={handleNavigateToTheOva}>
           Go to the OVA
         </Button>
-        <Button onClick={handleZip} disabled={mutation.isPending}>
-          {mutation.isPending ? (
+        <Button onClick={handleZip} disabled={isStarting}>
+          {isStarting ? (
             <span className="flex items-center justify-center">
               <svg
                 aria-hidden="true"
